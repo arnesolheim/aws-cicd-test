@@ -6,9 +6,27 @@ phases:
   pre_build:
     commands:
       - echo "pre_build phase started at $(date)"
+      - cd ${CODEBUILD_SRC_DIR_source2}
+      # See https://github.com/it-vegard/a11y-reference-website
+      - npm install -g node-gyp
   build:
+    # Primary source dir   : $CODEBUILD_SRC_DIR
+    # Secondary source dir : $CODEBUILD_SRC_DIR_source2
     commands:
       - echo "build phase started at $(date)"
+      - cd ${CODEBUILD_SRC_DIR_source2}
+      - npm install
   post_build:
     commands:
       - echo "post_build phase started at $(date)"
+      - cd ${CODEBUILD_SRC_DIR_source2}
+      - npm run test
+      # See https://playwright.dev/
+      # - npx playwright install chrome
+      # - npm run test:chrome
+
+# reports:
+#   test-report:
+#     files:
+#       - "results.xml"
+#     file-format: "JUNITXML"
