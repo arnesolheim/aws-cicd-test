@@ -23,7 +23,10 @@ phases:
       - npm run test
       - echo "================================================="
       - pwd
-      - ls -lR
+      - echo "================================================="
+      - find . -maxdepth 2 -type d -ls
+      - echo "================================================="
+      - ls -l
       - echo "================================================="
       # See https://playwright.dev/
       # - npx playwright install chrome
