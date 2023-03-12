@@ -21,12 +21,17 @@ phases:
       - echo "post_build phase started at $(date)"
       - cd ${CODEBUILD_SRC_DIR_source2}
       - npm run test
+      - echo "================================================="
+      - pwd
+      - ls -lR
+      - echo "================================================="
       # See https://playwright.dev/
       # - npx playwright install chrome
       # - npm run test:chrome
 
 reports:
   test-report:
+    base-directory: $CODEBUILD_SRC_DIR_source2
     files:
       - "results.xml"
     file-format: "JUNITXML"

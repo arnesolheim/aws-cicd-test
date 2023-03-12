@@ -267,6 +267,14 @@ Resources:
             Effect: "Allow"
             Resource: "*"
           - Action:
+              - "codebuild:CreateReportGroup"
+              - "codebuild:DeleteReportGroup"
+              - "codebuild:ListReportGroups"
+              - "codebuild:UpdateReportGroup"
+            Effect: "Allow"
+            Resource:
+              - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:report-group/codebuild-*"
+          - Action:
               - "logs:CreateLogGroup"
               - "logs:CreateLogStream"
               - "logs:PutLogEvents"
