@@ -1,0 +1,14 @@
+version: 0.2
+
+# See https://docs.aws.amazon.com/codebuild/latest/userguide/build-spec-ref.html
+
+phases:
+  pre_build:
+    commands:
+      - echo "pre_build phase started at $(date)"
+  build:
+    commands:
+      - echo "build phase started at $(date)"
+  post_build:
+    commands:
+      - echo "post_build phase started at $(date)"
