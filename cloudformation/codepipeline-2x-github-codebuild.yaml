@@ -1,0 +1,326 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This stack deploys a CI pipeline using CodePipeline and CodeBuild (using two GitHub repositories as its sources)
+
+Parameters:
+  PipelineName:
+    Description: "Name of the pipeline itself (used for CodeStar connection name, ECR repo name etc.)"
+    Type: String
+  GitHubRepositoryOwner1:
+    Description: "The owner of the primary GitHub repository where source changes are to be detected"
+    Type: String
+    Default: "arnesolheim"
+  GitHubRepositoryName1:
+    Description: "The name of the primary GitHub repository where source changes are to be detected"
+    Type: String
+    Default: "aws-cicd-test"
+  GitHubRepositoryOwner2:
+    Description: "The owner of the secondary GitHub repository where source changes are to be detected"
+    Type: String
+    Default: "it-vegard"
+  GitHubRepositoryName2:
+    Description: "The name of the secondary GitHub repository where source changes are to be detected"
+    Type: String
+    Default: "a11y-reference-website"
+  GitHubBranch1:
+    Description: "Name of the Git branch to monitor in the primary Git repository"
+    Type: String
+    Default: "main"
+  GitHubBranch2:
+    Description: "Name of the Git branch to monitor in the secondary Git repository"
+    Type: String
+    Default: "main"
+  BuildSpecFile:
+    Description: "Path+filename of the BuildSpec file (Must be present in the primary source location)"
+    Type: String
+    Default: "codebuild/buildspec.yml"
+  BuildComputeType:
+    Description: "The type of compute environment. The compute type determines the number of CPU cores and memory the build environment uses"
+    Type: String
+    AllowedValues:
+      - "BUILD_GENERAL1_SMALL"
+      - "BUILD_GENERAL1_MEDIUM"
+      - "BUILD_GENERAL1_LARGE"
+    Default: "BUILD_GENERAL1_SMALL"
+  BuildEnvironmentType:
+    Description: "The type of build environment (Linux/Windows)"
+    Type: String
+    AllowedValues:
+      - "LINUX_CONTAINER"
+      - "WINDOWS_CONTAINER"
+    Default: "LINUX_CONTAINER"
+  BuildImage:
+    Description: "Reference to the Docker image to use for building. Example: aws/codebuild/standard:4.0"
+    Type: String
+    Default: "aws/codebuild/standard:4.0"
+  BuildTimeout:
+    Description: "Build timeout (in minutes)"
+    Type: Number
+    MinValue: 5
+    MaxValue: 120
+    Default: 10
+  QueueTimeout:
+    Description: "Build queue timeout (in minutes)"
+    Type: Number
+    MinValue: 5
+    MaxValue: 480
+    Default: 120
+
+Resources:
+  CodeStarConnection:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-codestarconnections-connection.html
+    Type: 'AWS::CodeStarConnections::Connection'
+    Properties:
+      ConnectionName: !Join ['-', ['GitHub', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+      ProviderType: GitHub
+  
+  CodePipeline:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-codepipeline-pipeline.html
+    Type: AWS::CodePipeline::Pipeline
+    DependsOn: CodeBuildProject
+    Properties:
+      ArtifactStore:
+        Location: !Ref PipelineArtifactsBucket
+        Type: "S3"
+      Name: !Sub "codepipeline-${PipelineName}-${AWS::Region}"
+      RestartExecutionOnUpdate: true
+      RoleArn: !GetAtt  CodePipelineServiceRole.Arn
+      # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-codepipeline-pipeline-stages.html
+      # and https://docs.aws.amazon.com/codepipeline/latest/userguide/reference-pipeline-structure.html
+      Stages:
+        - Name: Source
+          # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-codepipeline-pipeline-stages-actions.html
+          Actions:
+          - Name: Source
+            ActionTypeId:
+              Category: Source
+              Owner: AWS
+              Version: 1
+              Provider: CodeStarSourceConnection
+            OutputArtifacts:
+            - Name: "Source1PulledFromGitHub"
+            Configuration:
+              ConnectionArn: !Ref CodeStarConnection
+              BranchName: !Ref GitHubBranch1
+              FullRepositoryId: !Sub "${GitHubRepositoryOwner1}/${GitHubRepositoryName1}"
+        - Name: Build
+          # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-codepipeline-pipeline-stages-actions.html
+          Actions:
+          - Name: Build
+            ActionTypeId:
+              Category: Build
+              Owner: AWS
+              Version: 1
+              Provider: CodeBuild
+            InputArtifacts:
+            - Name: "Source1PulledFromGitHub"
+            Configuration:
+              ProjectName: !Sub "build-${PipelineName}-${AWS::Region}"
+
+  CodePipelineServiceRole:
+    # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-role.html
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - "sts:AssumeRole"
+            Effect: Allow
+            Principal:
+              Service:
+                - "codepipeline.amazonaws.com"
+
+  CodePipelinePolicy:
+    # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-policy.html
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Action:
+          - iam:PassRole
+          Resource: "*"
+          Effect: Allow
+          Condition:
+            StringEqualsIfExists:
+              iam:PassedToService:
+              - cloudformation.amazonaws.com
+              - ec2.amazonaws.com
+              - ecs-tasks.amazonaws.com
+        - Action:
+          - codecommit:CancelUploadArchive
+          - codecommit:GetBranch
+          - codecommit:GetCommit
+          - codecommit:GetUploadArchiveStatus
+          - codecommit:UploadArchive
+          Resource: "*"
+          Effect: Allow
+        - Action:
+          - "elasticloadbalancing:*"
+          - "cloudwatch:*"
+          - "s3:DeleteObject"
+          - "s3:GetObject"
+          - "s3:GetObjectVersion"
+          - "s3:ListBucket"
+          - "s3:PutObject"
+          - "s3:GetBucketPolicy"
+          - "sns:Publish"
+          - "cloudformation:*"
+          Resource: "*"
+          Effect: Allow
+        - Action:
+          - codebuild:BatchGetBuilds
+          - codebuild:StartBuild
+          Resource: "*"
+          Effect: Allow
+        - Action:
+          - ecr:DescribeImages
+          - ecr:GetAuthorizationToken
+          Resource: "*"
+          Effect: Allow
+        - Action:
+          - codestar-connections:CreateConnection
+          - codestar-connections:UseConnection
+          - codestar-connections:GetConnection
+          - codestar-connections:ListConnections
+          - codestar-connections:ListInstallationTargets
+          - codestar-connections:GetInstallationUrl
+          - codestar-connections:GetIndividualAccessToken
+          - codestar-connections:StartOAuthHandshake
+          - codestar-connections:UpdateConnectionInstallation
+          - codestar-connections:ListTagsForResource
+          Resource: "*"
+          Effect: Allow
+      PolicyName: !Join ['-', ['CP-Policy', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+      # Specify which role we are going to inject this policy (CodePipelinePolicy) into
+      Roles:
+        - !Ref CodePipelineServiceRole
+
+  CodeBuildProject:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-codebuild-project.html
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: !Sub "CodeBuild project for building in pipeline ${PipelineName}"
+      Environment:
+        ComputeType: !Ref BuildComputeType
+        Image: !Ref BuildImage
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: true
+        Type: !Ref BuildEnvironmentType
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref PipelineLogGroup
+          StreamName: !Ref PipelineName
+      Name: !Sub "codebuild-${PipelineName}-${AWS::Region}"
+      QueuedTimeoutInMinutes: !Ref QueueTimeout
+      ServiceRole: !Ref CodeBuildServiceRole
+      Source:
+        BuildSpec: !Ref BuildSpecFile
+        Type: CODEPIPELINE
+      TimeoutInMinutes: !Ref BuildTimeout
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_CUSTOM_CACHE
+          - LOCAL_DOCKER_LAYER_CACHE
+          - LOCAL_SOURCE_CACHE
+
+  CodeBuildServiceRole:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-role.html
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - "sts:AssumeRole"
+            Effect: Allow
+            Principal:
+              Service:
+                - "codebuild.amazonaws.com"
+
+  CodeBuildPolicy:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-policy.html
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: "iam:PassRole"
+            Effect: "Allow"
+            Resource: "*"
+          - Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Effect: "Allow"
+            Resource:
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:codebuild"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:codebuild:*"
+          - Action:
+              - "s3:PutObject"
+              - "s3:GetObject"
+              - "s3:GetObjectVersion"
+              - "s3:GetBucketAcl"
+              - "s3:GetBucketLocation"
+            Effect: "Allow"
+            Resource:
+              - !GetAtt PipelineArtifactsBucket.Arn
+          - Action:
+              - 'secretsmanager:GetSecretValue'
+            Effect: Allow
+            Resource: !Sub 'arn:aws:secretsmanager:*:${AWS::AccountId}:secret:/resources/code*'
+          - Action:
+              - 'ssm:GetParameter'
+              - 'ssm:GetParameters'
+            Effect: Allow
+            Resource: !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/resources/code*'
+      PolicyName: !Join ['-', ['CB-Policy', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+      # Specify which role we are going to inject this policy (CodeBuildPolicy) into
+      Roles:
+        - !Ref CodeBuildServiceRole
+
+  PipelineArtifactsBucket:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-s3-bucket.html
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Join ['-', ['build-artifacts', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: "aws:kms"
+
+  PipelineArtifactsBucketPolicy:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-s3-policy.html
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref PipelineArtifactsBucket
+        PolicyDocument:
+          Statement:
+            -
+              Action:
+                - s3:*
+              Effect: Allow
+              Resource:
+                - !Sub arn:aws:s3:::${PipelineArtifactsBucket}
+                - !Sub arn:aws:s3:::${PipelineArtifactsBucket}/*
+              Principal:
+                AWS:
+                  - !GetAtt CodePipelineServiceRole.Arn
+                  - !GetAtt CodeBuildServiceRole.Arn
+
+  PipelineLogGroup:
+  # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-logs-loggroup.html
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties: 
+      LogGroupName: !Join ['-', ['cicd-build-logs', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+      RetentionInDays: 90
