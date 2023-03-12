@@ -266,10 +266,16 @@ Resources:
           - Action: "iam:PassRole"
             Effect: "Allow"
             Resource: "*"
+          # See https://docs.aws.amazon.com/service-authorization/latest/reference/list_awscodebuild.html
           - Action:
+              - "codebuild:CreateReport"
               - "codebuild:CreateReportGroup"
+              - "codebuild:DeleteReport"
               - "codebuild:DeleteReportGroup"
               - "codebuild:ListReportGroups"
+              - "codebuild:ListReports"
+              - "codebuild:ListReportsForReportGroup"
+              - "codebuild:UpdateReport"
               - "codebuild:UpdateReportGroup"
             Effect: "Allow"
             Resource:
