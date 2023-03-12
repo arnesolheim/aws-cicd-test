@@ -25,8 +25,8 @@ phases:
       # - npx playwright install chrome
       # - npm run test:chrome
 
-# reports:
-#   test-report:
-#     files:
-#       - "results.xml"
-#     file-format: "JUNITXML"
+reports:
+  test-report:
+    files:
+      - "results.xml"
+    file-format: "JUNITXML"
