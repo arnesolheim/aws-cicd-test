@@ -6,33 +6,33 @@ Parameters:
     Description: "Name of the pipeline itself (used for CodeStar connection name, ECR repo name etc.)"
     Type: String
   GitHubRepositoryOwner1:
-    Description: "The owner of the primary GitHub repository where source changes are to be detected"
+    Description: "The owner of the primary (1) GitHub repository where source changes are to be detected"
     Type: String
     Default: "arnesolheim"
   GitHubRepositoryName1:
-    Description: "The name of the primary GitHub repository where source changes are to be detected"
+    Description: "The name of the primary (1) GitHub repository where source changes are to be detected"
     Type: String
     Default: "aws-cicd-test"
+  GitHubBranch1:
+    Description: "Name of the Git branch to monitor in the primary (1) Git repository"
+    Type: String
+    Default: "main"
   GitHubRepositoryOwner2:
-    Description: "The owner of the secondary GitHub repository where source changes are to be detected"
+    Description: "The owner of the secondary (2) GitHub repository where source changes are to be detected"
     Type: String
     Default: "it-vegard"
   GitHubRepositoryName2:
-    Description: "The name of the secondary GitHub repository where source changes are to be detected"
+    Description: "The name of the secondary (2) GitHub repository where source changes are to be detected"
     Type: String
     Default: "a11y-reference-website"
-  GitHubBranch1:
-    Description: "Name of the Git branch to monitor in the primary Git repository"
-    Type: String
-    Default: "main"
   GitHubBranch2:
-    Description: "Name of the Git branch to monitor in the secondary Git repository"
+    Description: "Name of the Git branch to monitor in the secondary (2) Git repository"
     Type: String
-    Default: "main"
+    Default: "master"
   BuildSpecFile:
     Description: "Path+filename of the BuildSpec file (Must be present in the primary source location)"
     Type: String
-    Default: "codebuild/buildspec.yml"
+    Default: "codebuild/buildspec.yaml"
   BuildComputeType:
     Description: "The type of compute environment. The compute type determines the number of CPU cores and memory the build environment uses"
     Type: String
@@ -90,21 +90,34 @@ Resources:
         - Name: Source
           # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-codepipeline-pipeline-stages-actions.html
           Actions:
-          - Name: Source
+          - Name: Source1
             ActionTypeId:
               Category: Source
               Owner: AWS
               Version: 1
               Provider: CodeStarSourceConnection
             OutputArtifacts:
-            - Name: "Source1PulledFromGitHub"
+            - Name: "source1"
             Configuration:
               ConnectionArn: !Ref CodeStarConnection
               BranchName: !Ref GitHubBranch1
               FullRepositoryId: !Sub "${GitHubRepositoryOwner1}/${GitHubRepositoryName1}"
+          - Name: Source2
+            ActionTypeId:
+              Category: Source
+              Owner: AWS
+              Version: 1
+              Provider: CodeStarSourceConnection
+            OutputArtifacts:
+            - Name: "source2"
+            Configuration:
+              ConnectionArn: !Ref CodeStarConnection
+              BranchName: !Ref GitHubBranch2
+              FullRepositoryId: !Sub "${GitHubRepositoryOwner2}/${GitHubRepositoryName2}"
         - Name: Build
           # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-codepipeline-pipeline-stages-actions.html
           Actions:
+          # See https://docs.aws.amazon.com/codepipeline/latest/userguide/action-reference-CodeBuild.html
           - Name: Build
             ActionTypeId:
               Category: Build
@@ -112,9 +125,11 @@ Resources:
               Version: 1
               Provider: CodeBuild
             InputArtifacts:
-            - Name: "Source1PulledFromGitHub"
+            - Name: "source1"
+            - Name: "source2"
             Configuration:
-              ProjectName: !Sub "build-${PipelineName}-${AWS::Region}"
+              ProjectName: !Sub "codebuild-${PipelineName}-${AWS::Region}"
+              PrimarySource: "source1"
 
   CodePipelineServiceRole:
     # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-role.html
@@ -219,6 +234,7 @@ Resources:
       Source:
         BuildSpec: !Ref BuildSpecFile
         Type: CODEPIPELINE
+        GitCloneDepth: 1
       TimeoutInMinutes: !Ref BuildTimeout
       Cache:
         Type: LOCAL
@@ -256,8 +272,7 @@ Resources:
               - "logs:PutLogEvents"
             Effect: "Allow"
             Resource:
-              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:codebuild"
-              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:codebuild:*"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:cicd-build-logs-*"
           - Action:
               - "s3:PutObject"
               - "s3:GetObject"
