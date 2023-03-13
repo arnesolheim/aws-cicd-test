@@ -1,0 +1,302 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: This stack creates a new EC2 instance
+
+Parameters:
+  # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/parameters-section-structure.html
+  InstanceType:
+    Description: "Desired EC2 instance type"
+    Type: String
+    AllowedPattern: "[a-z][a-z0-9]\\.[a-z0-9]+"
+    AllowedValues:
+          - t3.nano
+          - t3.micro
+          - t3.small
+          - t3.medium
+    Default: t3.small
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-regexes.html
+    MaxLength: 64
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2"
+  VpcId:
+    Description: "Reference to the ID of the VPC in which we will be placing this EC2 instance"
+    Type: AWS::EC2::VPC::Id
+  InstanceName:
+    Description: "The (Name) tag to add to this instance"
+    Type: String
+
+Resources:
+  Ec2InstanceRole:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-role.html
+    Type: "AWS::IAM::Role"
+    Properties: 
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - "sts:AssumeRole"
+            Effect: Allow
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+      # See https://docs.aws.amazon.com/AmazonECR/latest/userguide/security-iam-awsmanpol.html#security-iam-awsmanpol-AmazonEC2ContainerRegistryReadOnly
+      ManagedPolicyArns:
+        # To be able to fetch Docker images from our ECR repositories:
+        - "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+        # Necessary access needed by the Systems Manager Agent:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      RoleName: !Join ['-', ['Ec2InstanceRole', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+
+  Ec2InstanceRolePolicy:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-policy.html
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+            # To be able to connect via Session Manager:
+            # (See https://docs.aws.amazon.com/systems-manager/latest/userguide/getting-started-create-iam-instance-profile.html)
+          - Effect: Allow
+            Action:
+              - "ssmmessages:CreateControlChannel"
+              - "ssmmessages:CreateDataChannel"
+              - "ssmmessages:OpenControlChannel"
+              - "ssmmessages:OpenDataChannel"
+              - "ssm:UpdateInstanceInformation"
+            Resource: "*"
+            # To be able to write Session Manager logs to an encrypted S3 bucket:
+          - Effect: Allow
+            Action:
+              - "s3:GetEncryptionConfiguration"
+            Resource: "*"
+            # To be able to create and write to CloudWatch logs:
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:DescribeLogGroups"
+              - "logs:DescribeLogStreams"
+              - "logs:PutLogEvents"
+            Resource: "*"
+            # To be able to get related entries in Secrets Manager:
+          - Effect: Allow
+            Action:
+              - "secretsmanager:GetSecretValue"
+            Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:/apps/${InstanceName}/*"
+            # To be able to get related entries in Systems Manager Parameter Store:
+          - Effect: Allow
+            Action:
+              - "ssm:GetParameter"
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter:/resources/ec2/${InstanceName}/*"
+      PolicyName: !Join ['-', ['RelevantServiceAccess', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+      Roles:
+        - !Ref Ec2InstanceRole
+
+  Ec2KeyPair:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-keypair.html
+    Type: AWS::EC2::KeyPair
+    Properties: 
+      KeyName: !Sub ${InstanceName}-keypair
+
+  Ec2InstanceProfile:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-instanceprofile.html
+    Type: "AWS::IAM::InstanceProfile"
+    Properties: 
+      Roles: 
+        - Ref: Ec2InstanceRole
+
+  EC2Instance:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-instance.html
+    Type: AWS::EC2::Instance
+    DependsOn: InstanceCloudWatchAgentConfig
+    Properties:
+      IamInstanceProfile: !Ref Ec2InstanceProfile 
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref Ec2KeyPair
+      Monitoring: false
+      SecurityGroupIds:
+        - !GetAtt InstanceSecurityGroup.GroupId
+      Tenancy: default
+      Tags:
+        - Key: "Name"
+          Value: !Ref InstanceName
+      UserData:
+        # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+
+          # Make sure everything installed via the YUM Package Manager is up to date:
+          yum --assumeyes update
+
+          # Set the default region in the AWS CLI to be the same region as where this EC2 instance is located:
+          sudo --user=ec2-user aws configure set region $(curl --silent http://169.254.169.254/latest/meta-data/placement/region)
+
+          # Install CollectD:
+          amazon-linux-extras install -y collectd
+
+          # Install an configure the CloudWatch Agent:
+          yum --assumeyes install amazon-cloudwatch-agent
+          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c ssm:/resources/ec2/${InstanceName}/cloudwatch-agent-config
+
+          # Install and start the Docker service:
+          amazon-linux-extras install -y docker
+          usermod -aG docker ec2-user
+          systemctl enable docker.service
+          systemctl enable containerd.service
+          systemctl daemon-reload
+          systemctl restart docker.service
+
+          # Install the .jq tool:
+          yum --assumeyes install jq
+
+          # Install Telnet:
+          yum --assumeyes install telnet
+
+          # Add local bin directory to the ec2-user:
+          mkdir --parent /home/ec2-user/bin && chown ec2-user.ec2-user /home/ec2-user/bin && echo "export PATH=${!PATH}:/home/ec2-user/bin" >> /home/ec2-user/.bashrc
+
+  InstanceSecurityGroup:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-security-group.html
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Ref AWS::StackName
+      VpcId: !Ref VpcId
+
+  InstanceIdReference:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ssm-parameter.html
+    Type: AWS::SSM::Parameter
+    Properties: 
+      DataType: text
+      Description: !Ref AWS::StackName
+      Name: !Sub "/resources/ec2/${InstanceName}/instance-id"
+      Tier: Standard
+      Type: String
+      Value: !Ref EC2Instance
+
+  InstanceSecurityGroupReference:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ssm-parameter.html
+    Type: AWS::SSM::Parameter
+    Properties: 
+      DataType: text
+      Description: !Ref AWS::StackName
+      Name: !Sub "/resources/ec2/${InstanceName}/security-group"
+      Tier: Standard
+      Type: String
+      Value: !Ref InstanceSecurityGroup
+
+  InstanceCloudWatchAgentConfig:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ssm-parameter.html
+    Type: AWS::SSM::Parameter
+    Properties: 
+      DataType: text
+      Description: !Ref AWS::StackName
+      Name: !Sub "/resources/ec2/${InstanceName}/cloudwatch-agent-config"
+      Tier: Standard
+      Type: String
+      Value: |
+        {
+          "agent": {
+            "metrics_collection_interval": 60,
+            "run_as_user": "root"
+          },
+          "logs": {
+            "logs_collected": {
+              "files": {
+                "collect_list": [
+                  {
+                    "file_path": "/var/log/messages",
+                    "log_group_name": "ec2_linux_messages",
+                    "log_stream_name": "{instance_id}"
+                  },
+                  {
+                    "file_path": "/var/log/secure",
+                    "log_group_name": "ec2_linux_secure",
+                    "log_stream_name": "{instance_id}"
+                  }
+                ]
+              }
+            }
+          },
+          "metrics": {
+            "append_dimensions": {
+              "AutoScalingGroupName": "${aws:AutoScalingGroupName}",
+              "ImageId": "${aws:ImageId}",
+              "InstanceId": "${aws:InstanceId}",
+              "InstanceType": "${aws:InstanceType}"
+            },
+            "metrics_collected": {
+              "collectd": {
+                "metrics_aggregation_interval": 60
+              },
+              "cpu": {
+                "measurement": [
+                  "cpu_usage_idle",
+                  "cpu_usage_iowait",
+                  "cpu_usage_user",
+                  "cpu_usage_system"
+                ],
+                "metrics_collection_interval": 60,
+                "totalcpu": false
+              },
+              "disk": {
+                "measurement": [
+                  "used_percent",
+                  "inodes_free"
+                ],
+                "metrics_collection_interval": 60,
+                "resources": [
+                  "*"
+                ]
+              },
+              "diskio": {
+                "measurement": [
+                  "io_time"
+                ],
+                "metrics_collection_interval": 60,
+                "resources": [
+                  "*"
+                ]
+              },
+              "mem": {
+                "measurement": [
+                  "mem_used_percent"
+                ],
+                "metrics_collection_interval": 60
+              },
+              "statsd": {
+                "metrics_aggregation_interval": 60,
+                "metrics_collection_interval": 30,
+                "service_address": ":8125"
+              },
+              "swap": {
+                "measurement": [
+                  "swap_used_percent"
+                ],
+                "metrics_collection_interval": 60
+              }
+            }
+          }
+        }
+
+Outputs:
+  KeyPairId:
+    Description: "KeyId of the EC2 KeyPair of the newly created EC2 key pair"
+    Value: !GetAtt Ec2KeyPair.KeyPairId
+  Ec2InstanceId:
+    Description: "InstanceId of the newly created EC2 instance"
+    Value: !Ref EC2Instance
+  Ec2InstanceAZ:
+    Description: "Availability Zone of the newly created EC2 instance"
+    Value: !GetAtt EC2Instance.AvailabilityZone
+  Ec2InstancePrivateIP:
+    Description: "Private IP address of the newly created EC2 instance"
+    Value: !GetAtt EC2Instance.PrivateIp
+  Ec2InstancePublicDNS:
+    Description: "Public DNSName of the newly created EC2 instance"
+    Value: !GetAtt EC2Instance.PublicDnsName
+  Ec2InstancePublicIP:
+    Description: "Public IP address of the newly created EC2 instance"
+    Value: !GetAtt EC2Instance.PublicIp
+  Ec2InstanceSecurityGroup:
+    Description: "The ID of the Security Group of the newly created EC2 instance"
+    Value: !Ref InstanceSecurityGroup

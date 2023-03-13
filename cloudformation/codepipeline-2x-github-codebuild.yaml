@@ -2,6 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: This stack deploys a CI pipeline using CodePipeline and CodeBuild (using two GitHub repositories as its sources)
 
 Parameters:
+  # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/parameters-section-structure.html
   PipelineName:
     Description: "Name of the pipeline itself (used for CodeStar connection name, ECR repo name etc.)"
     Type: String

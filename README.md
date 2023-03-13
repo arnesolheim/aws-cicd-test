@@ -23,7 +23,7 @@ In this example we are setting things up for building the project located in the
 Example stack name: "cicd-for-a11y-reference-website"
 Example parameters to use when creating the AWS CloudFormation stack based on the template:
 
-| First Header  | Second Header |
+| Parameter  | Second Value |
 | ------------- | ------------- |
 |GitHubRepositoryOwner1|arnesolheim|
 |GitHubRepositoryName1|aws-cicd-test|
@@ -31,4 +31,21 @@ Example parameters to use when creating the AWS CloudFormation stack based on th
 |GitHubRepositoryOwner2|it-vegard|
 |GitHubRepositoryName2|a11y-reference-website|
 |GitHubBranch2|master|
-|PipelineName|build-and-test-a11y-reference-website|
+|PipelineName|cicd-for-a11y-reference-website|
+
+---
+
+## Testing the build directly on an EC2 instance (for lower roundtripe times)
+To be able to shorten the round trip time when doing iterative testing on changes that you do on some Build Spec file you could start up an EC2 instance and perform the build locally there with the same build image as CodeBuild would use. To be able to do this you first create the EC2 instance (automated - through Infrastructure as Code of course - using CloudFormation), and then you can log into this instance and perform the build locally there.
+
+### Setting up the EC2 instance
+You can use the CloudFormation template "`cloudformation/ec2-instance-for-local-build-testing.yaml`" for creating the EC2 instance.
+
+Example stack name: "ec2-instance-for-local-build-testing"
+Example parameters to use when creating the AWS CloudFormation stack based on the template:
+
+| Parameter  | Second Value |
+| ------------- | ------------- |
+|InstanceType|t3.small|
+|InstanceName|ec2-instance-for-local-build-testing|
+|VpcId|_<Select desired VPC from the dropdown menu>_|
