@@ -48,4 +48,15 @@ Example parameters to use when creating the AWS CloudFormation stack based on th
 | ------------- | ------------- |
 |InstanceType|t3.small|
 |InstanceName|ec2-instance-for-local-build-testing|
-|VpcId|_<Select desired VPC from the dropdown menu>_|
+|VpcId|_&lt;Select desired VPC from the dropdown menu&gt;_|
+
+### Connecting to the EC2 instance
+You have two ways of connecting to the EC2 instance; either through regular SSH, or through Systems Manager Session Manager (recommended).
+For the latter option you first [install the Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html), and then after that you can use the AWS CLI for connecting.
+
+Example:
+```
+aws ssm start-session --target <instance-id> --profile <aws-cli-profile-name> --region <aws-region>
+```
+
+If you want to connect to the EC2 instance using regular SSH you first need to open up in the Security Group for ingress traffic from your local IP address towards the EC2 instance (Alter the "`InstanceSecurityGroup`" resource in the CloudFormation template for this and update the stack), and then obtain the private key part of the key pair. The private key part can be found in AWS Systems Manager Parameter Store using a parameter with the following name: "`/ec2/keypair/<key_pair_id>`", where the "`<key-pair-id>`" can be found as the output with key "`KeyPairId`" in the CloudFormation stack that you created using the "`cloudformation/ec2-instance-for-local-build-testing.yaml`" CloudFormation template.
