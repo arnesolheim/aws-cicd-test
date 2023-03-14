@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: This stack creates a new App Runner service
+
+Parameters:
+  ImageNameAndVersion:
+    Description: "The name[:version] string identifying the Docker image to fetch from a local ECR in the same account as where we create this App Runner service"
+    Type: String
+    Default: "nginxdemos/hello:latest"
+  ListenerPort:
+    Description: "The TCP port (number) that the Docker container used by this App Runner service is listening on"
+    Type: Number
+    MinValue: 1
+    MaxValue: 49151
+    Default: 8080
+
+Resources:
+  AppRunnerService:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-apprunner-service.html
+    Type: AWS::AppRunner::Service
+    Properties:
+      NetworkConfiguration:
+        # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-apprunner-service-networkconfiguration.html
+        EgressConfiguration:
+             EgressType: DEFAULT
+        IngressConfiguration:
+            IsPubliclyAccessible: true
+      SourceConfiguration:
+        AuthenticationConfiguration:
+          AccessRoleArn: !GetAtt AppRunnerAccessRole.Arn
+        AutoDeploymentsEnabled: true
+        ImageRepository:
+          ImageConfiguration: 
+              Port: !Ref ListenerPort
+          ImageIdentifier: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageNameAndVersion}
+          ImageRepositoryType: "ECR"
+
+  AppRunnerAccessRole:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-role.html
+    Type: "AWS::IAM::Role"
+    Properties: 
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - "sts:AssumeRole"
+            Effect: Allow
+            Principal:
+              Service:
+                - "build.apprunner.amazonaws.com"
+      # See https://docs.aws.amazon.com/AmazonECR/latest/userguide/security-iam-awsmanpol.html#security-iam-awsmanpol-AmazonEC2ContainerRegistryReadOnly
+      ManagedPolicyArns:
+        # To be able to fetch Docker images from our ECR repositories:
+        - "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+        # Necessary access needed by the Systems Manager Agent:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      RoleName: !Join ['-', ['AppRunnerAccessRole', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+
+  AppRunnerServiceAccessPolicy:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-policy.html
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+            # To be able to fetch images from ECR repositories in our own AWS account:
+          - Effect: Allow
+            Action:
+              - "ecr:BatchCheckLayerAvailability"
+              - "ecr:BatchGetImage"
+              - "ecr:DescribeImages"
+              - "ecr:GetAuthorizationToken"
+              - "ecr:GetDownloadUrlForLayer"
+            Resource: "*"
+      PolicyName: !Join ['-', ['AppRunnerServiceAccess', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+      Roles:
+        - !Ref AppRunnerAccessRole
+
+Outputs:
+  EcrImage:
+    Description: "The ECR image name of the Docker image to be used for this App Runner service"
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageNameAndVersion}
