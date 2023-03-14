@@ -87,7 +87,7 @@ Resources:
             Action:
               - "ssm:GetParameter"
             Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter:/resources/ec2/${InstanceName}/*"
-      PolicyName: !Join ['-', ['RelevantServiceAccess', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+      PolicyName: !Join ['-', ['Ec2InstanceRoleAccess', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
       Roles:
         - !Ref Ec2InstanceRole
 
