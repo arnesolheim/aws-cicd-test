@@ -109,6 +109,16 @@ Resources:
     Type: AWS::EC2::Instance
     DependsOn: InstanceCloudWatchAgentConfig
     Properties:
+      # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-blockdev-mapping.html
+      # and https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-blockdev-template.html
+      BlockDeviceMappings:
+        # See https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/device_naming.html
+        - DeviceName: "/dev/sdf"
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: 32
+            VolumeType: "gp3"
       IamInstanceProfile: !Ref Ec2InstanceProfile 
       ImageId: !Ref LatestAmiId
       InstanceType: !Ref InstanceType
@@ -128,6 +138,18 @@ Resources:
           # Make sure everything installed via the YUM Package Manager is up to date:
           yum --assumeyes update
 
+          # Format and mount the secondary EBS volume:
+          # See https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/device_naming.html
+          # and https://aws.amazon.com/blogs/compute/how-to-mount-linux-volume-and-keep-mount-point-consistency/
+          yum --assumeyes install xfsprogs
+          DEVICENAME="/dev/sdf"
+          mkfs --type=xfs ${!DEVICENAME}
+          cp /etc/fstab /etc/fstab.orig
+          MOUNTPOINT="/mnt/disk1"
+          echo "$(blkid --output export ${!DEVICENAME} | grep ^UUID=) ${!MOUNTPOINT} xfs defaults,noatime" | tee --append /etc/fstab
+          mkdir ${!MOUNTPOINT} && chgrp wheel ${!MOUNTPOINT} && chmod g+w ${!MOUNTPOINT} && mount ${!MOUNTPOINT}
+          mkdir /data && ln --symbolic ${!MOUNTPOINT} /data/disk1
+
           # Set the default region in the AWS CLI to be the same region as where this EC2 instance is located:
           sudo --user=ec2-user aws configure set region $(curl --silent http://169.254.169.254/latest/meta-data/placement/region)
 
@@ -144,7 +166,13 @@ Resources:
           systemctl enable docker.service
           systemctl enable containerd.service
           systemctl daemon-reload
-          systemctl restart docker.service
+          # We move the main Docker directory off the root partition, as this volume can be quite small on small EC2 instances
+          # (and we ant to make sure that we will not fill up all available space on the root volume)
+          systemctl stop docker.service          
+          mv /var/lib/docker ${!MOUNTPOINT}/var_lib_docker && ln --symbolic ${!MOUNTPOINT}/var_lib_docker /var/lib/docker
+          chgrp -R wheel /mnt/disk1/var_lib_docker
+          chmod -R g+rx /mnt/disk1/var_lib_docker
+          systemctl start docker.service
 
           # Install the .jq tool:
           yum --assumeyes install jq
