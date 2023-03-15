@@ -5,7 +5,6 @@ Parameters:
   ImageNameAndVersion:
     Description: "The name[:version] string identifying the Docker image to fetch from a local ECR in the same account as where we create this App Runner service"
     Type: String
-    Default: "nginxdemos/hello:latest"
   ListenerPort:
     Description: "The TCP port (number) that the Docker container used by this App Runner service is listening on"
     Type: Number
