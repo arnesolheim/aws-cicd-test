@@ -21,15 +21,12 @@ Parameters:
   GitHubRepositoryOwner2:
     Description: "The owner of the secondary (2) GitHub repository where source changes are to be detected"
     Type: String
-    Default: "it-vegard"
   GitHubRepositoryName2:
     Description: "The name of the secondary (2) GitHub repository where source changes are to be detected"
     Type: String
-    Default: "a11y-reference-website"
   GitHubBranch2:
     Description: "Name of the Git branch to monitor in the secondary (2) Git repository"
     Type: String
-    Default: "master"
   BuildSpecFile:
     Description: "Path+filename of the BuildSpec file (Must be present in the primary source location)"
     Type: String

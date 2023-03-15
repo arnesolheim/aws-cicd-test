@@ -5,13 +5,21 @@ version: 0.2
 # Primary source dir   : $CODEBUILD_SRC_DIR
 # Secondary source dir : $CODEBUILD_SRC_DIR_source2
 
+env:
+  variables:
+    PROJECT_NAME: "a11y-reference-website"
 phases:
   pre_build:
     commands:
       - echo "pre_build phase started at $(date)"
+      - cp ${CODEBUILD_SRC_DIR}/Dockerfile ${CODEBUILD_SRC_DIR_source2}
   build:
     commands:
       - echo "build phase started at $(date)"
+      # See https://github.com/it-vegard/a11y-reference-website
+      - cd ${CODEBUILD_SRC_DIR_source2}
+      - docker build -t ${PROJECT_NAME} .
   post_build:
     commands:
       - echo "post_build phase started at $(date)"
+      - ${CODEBUILD_SRC_DIR}/scripts/push_docker_image_to_ecr.sh NO_PROFILE ${PROJECT_NAME} latest ${PROJECT_NAME} ${AWS_REGION}
