@@ -314,7 +314,11 @@ Resources:
   PipelineArtifactsBucket:
     # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-s3-bucket.html
     Type: AWS::S3::Bucket
-    DeletionPolicy: Delete
+    # Deleting the bucket when it has objects in it will fail, so we choose to retain the bucket
+    # to be able to delete the CloudFormation stack without errors. You will need to remember to
+    # delete the objects and the bucket yourself directly either via the AWS Console or the AWS CLI
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-attribute-deletionpolicy.html
+    DeletionPolicy: Retain
     Properties:
       BucketName: !Join ['-', ['build-artifacts', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
       PublicAccessBlockConfiguration:
