@@ -1,0 +1,39 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: This stack creates a new private ECR repository
+
+Parameters:
+  PrivateEcrRepositoryName:
+    Description: The name of the private ECR repository to create
+    Type: String
+    MinLength: 2
+    MaxLength: 256
+    AllowedPattern: (?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*
+
+Resources:
+  EcrPrivateRepository:
+    # See https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ecr-repository.html
+    Type: AWS::ECR::Repository
+    Properties:
+      EncryptionConfiguration:
+        EncryptionType: KMS
+      ImageScanningConfiguration:
+            ScanOnPush: true
+      ImageTagMutability: MUTABLE
+      RepositoryName: !Ref PrivateEcrRepositoryName
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Sid: AllowAccessForCodeBuild
+            Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - "ecr:GetDownloadUrlForLayer"
+              - "ecr:BatchGetImage"
+              - "ecr:BatchCheckLayerAvailability"
+              - "ecr:PutImage"
+              - "ecr:InitiateLayerUpload"
+              - "ecr:UploadLayerPart"
+              - "ecr:CompleteLayerUpload"
